@@ -153,6 +153,7 @@ class Shell(object):
 			return self._run_command(command, list(hosts.keys()))
 
 	def _run_command(self, command, hosts, n=1):
+		print("Running \"{command}\" on {n} hosts... ".format(command=command, n=len(hosts)), end="")
 		# Run command on n random hosts to test
 		random.shuffle(hosts)
 		test_results = execute(exec, command, hosts=hosts[:n])
@@ -160,12 +161,13 @@ class Shell(object):
 			result = test_results[host]
 
 			if isinstance(result, Exception) or result.failed:
-				print("test failed on {host}. aborting".format(host=host))
+				print("failed on {host}. aborting".format(host=host))
 				return False
 
 		# If successful, run on everything else
 		results = execute(exec, command, hosts=hosts[n:])
 		results.update(test_results)
+		print("done")
 
 		success = True
 		for host in sorted(results.keys()):
@@ -189,7 +191,7 @@ class Shell(object):
 				status = "success"
 				color = ("\033[1;32m", "\033[1;m")
 
-			print("{host:<40} {0}{status}{1} {output}".format(color[0], color[1], host=host, status=status, output=lines[-1].strip()))
+			print("{host:<40} {0}{status:<10}{1} {output}".format(color[0], color[1], host=host, status=status, output=lines[-1].strip()))
 
 		self.output = results
 
@@ -233,6 +235,12 @@ if __name__ == "__main__":
 	parser.add_argument("-v", "--verbose", action="count", default=0)
 	parser.add_argument("-y", "--accept-all", action="store_true")
 	parser.add_argument("-t", "--tag", help="limit host list to those tagged with this value", type=str, action="append")
+	parser.add_argument("command", help="command (with arguments) to run on remote host(s)", nargs=argparse.REMAINDER)
 	args = parser.parse_args()
 
-	Shell(verbosity=args.verbose, accept_all=args.accept_all, tags=args.tag).run()
+	shell = Shell(verbosity=args.verbose, accept_all=args.accept_all, tags=args.tag)
+
+	if args.command:
+		shell.run_command(" ".join(args.command))
+	else:
+		shell.run()
