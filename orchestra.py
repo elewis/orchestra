@@ -54,79 +54,31 @@ class Shell(object):
 
 		self.output = {}
 
-	def run(self):
-		whitespace = re.compile("\s+")
+		self.builtins = {
+			"/help":  self.help,
+			"/tag":   self.tag,
+			"/hosts": self.host,
+			"/exit":  self.exit,
+			"/print": self.print,
+		}
+
+	def run_forever(self):
 		while True:
 			try:
 				line = input(self.prompt).strip()
-				if line:
-					line = whitespace.sub(" ", line)
-					args = line.split(" ")
+				args = line.split()
 
-					if args[0] == "help":
-						print("Commands:")
-						print("exit - quit the shell")
-						print("help - print this help message")
-						print("hosts - list tagged hosts")
-						print("run  - run command on tagged hosts")
-						print("tags - edit active host tags")
+				if len(args) == 0:
+					pass
 
-					elif args[0] == "exit":
-						print("Goodbye")
-						sys.exit(0)
+				elif args[0] in self.builtins:
+					self.builtins[args[0]](*args[1:])
 
-					elif args[0] == "run":
-						self.run_command(" ".join(args[1:]))
+				elif args[0].startswith("/"):
+					print("{}: command not found".format(args[0]))
 
-					elif args[0] == "tags":
-						if len(args[1:]) == 0:
-							print("Commands:")
-							print("tags list 		- list active tags")
-							print("tags set <*t> 	- set full active tags")
-							print("tags add <*t> 	- append to active tags")
-							print("tags remove <*t> - remove tags from active set")
-						elif args[1] == "list":
-							for tag in sorted(self.tags):
-								print(tag)
-
-						elif args[1] == "set":
-							self.tags = args[2:]
-
-						elif args[1] == "add":
-							self.tags.extend(args[2:])
-
-						elif args[1] == "remove":
-							for tag in args[2:]:
-								try:
-									self.tags.remove(tag)
-								except ValueError as e:
-									# tag not found, don't care
-									pass
-
-					elif args[0] == "hosts":
-						hosts = self._host_manager.get_hosts(self.tags)
-						template = "{{host:<{col1}}}\t{{tags}}".format(col1=max(len(h) for h in hosts))
-						for host, attrs in sorted(hosts.items()):
-							print(template.format(host=host, tags="/".join(sorted(attrs["tags"]))))
-
-					elif args[0] == "print":
-						if len(args) <= 1:
-							hosts = list(sorted(self.output.keys()))
-						else:
-							hosts = args[1:]
-
-						for host in hosts:
-							if host in self.output:
-								print("  host: {}".format(host))
-								print("status: {}".format("not implemented"))
-								for line in self.output[host].strip().splitlines():
-									print("output: {}".format(line.strip()))
-								print()
-							else:
-								print(" error: unknown host '{}'".format(host))
-
-					else:
-						print("{}: command not found".format(args[0]))
+				else:
+					self.run(" ".join(args))
 
 			except KeyboardInterrupt as e:
 				print()
@@ -134,7 +86,7 @@ class Shell(object):
 			except Exception as e:
 				print("an error occurred: {}".format(str(e)))
 
-	def run_command(self, command):
+	def run(self, command):
 		# Validate provided command
 		if not command.strip():
 			raise ValueError("command cannot be empty")
@@ -152,22 +104,19 @@ class Shell(object):
 			# Return error code if any single host failed
 			return self._run_command(command, list(hosts.keys()))
 
-	def _run_command(self, command, hosts, n=1):
-		print("Running \"{command}\" on {n} hosts... ".format(command=command, n=len(hosts)), end="")
+	def _run_command(self, command, hosts, x=1):
 		# Run command on n random hosts to test
 		random.shuffle(hosts)
-		test_results = execute(exec, command, hosts=hosts[:n])
+		test_results = execute(exec, command, hosts=hosts[:x])
 		for host in sorted(test_results.keys()):
 			result = test_results[host]
-
 			if isinstance(result, Exception) or result.failed:
-				print("failed on {host}. aborting".format(host=host))
+				print("failed on test host {host}. aborting".format(host=host))
 				return False
 
 		# If successful, run on everything else
-		results = execute(exec, command, hosts=hosts[n:])
+		results = execute(exec, command, hosts=hosts[x:])
 		results.update(test_results)
-		print("done")
 
 		success = True
 		for host in sorted(results.keys()):
@@ -197,6 +146,72 @@ class Shell(object):
 
 		# Return True if all successful, False otherwise
 		return success
+
+	def help(self, *_):
+		print("Commands:")
+		for command in sorted(self.builtins):
+			print("{command:<15}".format(command=command))
+
+	def tag(self, cmd, *tags):
+
+		def usage():
+			print("/tag list        - list active tags")
+			print("/tag set <*t>    - set full active tags")
+			print("/tag add <*t>    - append to active tags")
+			print("/tag remove <*t> - remove active tags")
+
+		if not cmd or cmd == "help":
+			usage()
+
+		elif cmd == "list":
+			for tag in sorted(self.tags):
+				print(tag)
+
+		elif cmd == "set":
+			self.tags = list(tags)
+
+		elif cmd == "add":
+			self.tags.extend(tags)
+
+		elif cmd == "remove":
+			for tag in tags:
+				try:
+					self.tags.remove(tag)
+				except ValueError as e:
+					# tag not found, don't care
+					pass
+
+		else:
+			usage()
+
+	def host(self, *_):
+		hosts = self._host_manager.get_hosts(self.tags)
+		template = "{{host:<{col1}}}\t{{tags}}".format(col1=max(len(h) for h in hosts))
+		for host, attrs in sorted(hosts.items()):
+			print(template.format(host=host, tags="/".join(sorted(attrs["tags"]))))
+
+	def print(self, *hosts):
+		if len(hosts) == 0:
+			hosts = list(sorted(self.output.keys()))
+
+		for host in hosts:
+			if host in self.output:
+				print("  host: {}".format(host))
+				print("status: {}".format("not implemented"))
+				for line in self.output[host].strip().splitlines():
+					print("output: {}".format(line.strip()))
+				print()
+			else:
+				print(" error: unknown host '{}'".format(host))
+
+	def exit(self, status=0, *_):
+		print("Goodbye")
+		if status:
+			sys.exit(status)
+		else:
+			sys.exit(0)
+
+
 
 
 class HostManager(object):
@@ -241,6 +256,6 @@ if __name__ == "__main__":
 	shell = Shell(verbosity=args.verbose, accept_all=args.accept_all, tags=args.tag)
 
 	if args.command:
-		shell.run_command(" ".join(args.command))
+		shell.run(" ".join(args.command))
 	else:
-		shell.run()
+		shell.run_forever()
